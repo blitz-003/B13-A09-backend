@@ -48,15 +48,11 @@ async function run() {
   try {
     // await client.connect();
 
-    const db = client.db("wanderlust");
-    const destinationCollection = db.collection("destinations");
-    const bookingCollection = db.collection("bookings");
-
     const db = client.db("ideaengine");
     const ideaCollection = db.collection("ideas");
     const commentCollection = db.collection("comments");
 
-    // 1. GET /ideas -> Fetch entire platform validation repository
+    // Fetch entire platform's idea
     app.get("/ideas", async (req, res) => {
       try {
         const result = await ideaCollection.find().toArray();
@@ -66,7 +62,7 @@ async function run() {
       }
     });
 
-    // 2. GET /ideas/featured -> Retrieve the top 4 highlighted validation targets for feed display
+    // Retrieve the top 4 highlighted validation targets for feed display
     app.get("/ideas/featured", async (req, res) => {
       try {
         const result = await ideaCollection.find().limit(4).toArray();
@@ -78,7 +74,7 @@ async function run() {
       }
     });
 
-    // 3. GET /ideas/user/:userId -> Fetch ideas created exclusively by a specific logged-in user
+    // Fetch ideas created exclusively by a specific user
     app.get("/ideas/user/:userId", verifyToken, async (req, res) => {
       try {
         const { userId } = req.params;
@@ -89,26 +85,21 @@ async function run() {
       } catch (err) {
         res
           .status(500)
-          .json({
-            error: "Failed to retrieve owned concept registry documents.",
-          });
+          .json({ error: "Failed to retrieve owned concept documents." });
       }
     });
 
-    app.get("/featured", async (req, res) => {
-      const result = await destinationCollection.find().limit(4).toArray();
-      res.json(result);
-    });
-
-    // 2. GET /ideas -> Fetch entire platform validation repository
-    app.get("/ideas", async (req, res) => {
+    // Get details for a single idea entry
+    app.get("/ideas/:id", async (req, res) => {
       try {
-        const result = await ideaCollection.find().toArray();
+        const { id } = req.params;
+        const result = await ideaCollection.findOne({ _id: new ObjectId(id) });
         res.json(result);
       } catch (err) {
-        res.status(500).json({ error: "Failed to fetch concept indexes." });
+        res.status(500).json({ error: "Failed to fetch idea details." });
       }
     });
+
     app.get("/destination", async (req, res) => {
       const result = await destinationCollection.find().toArray();
       res.json(result);
