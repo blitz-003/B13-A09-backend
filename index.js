@@ -78,6 +78,23 @@ async function run() {
       }
     });
 
+    // 3. GET /ideas/user/:userId -> Fetch ideas created exclusively by a specific logged-in user
+    app.get("/ideas/user/:userId", verifyToken, async (req, res) => {
+      try {
+        const { userId } = req.params;
+        const result = await ideaCollection
+          .find({ creatorId: userId })
+          .toArray();
+        res.json(result);
+      } catch (err) {
+        res
+          .status(500)
+          .json({
+            error: "Failed to retrieve owned concept registry documents.",
+          });
+      }
+    });
+
     app.get("/featured", async (req, res) => {
       const result = await destinationCollection.find().limit(4).toArray();
       res.json(result);
