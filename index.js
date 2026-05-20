@@ -21,7 +21,9 @@ const client = new MongoClient(uri, {
   },
 });
 
-const JWKS = createRemoteJWKSet(new URL(`${process.env.CLIENT_URL}/api/auth/jwks`));
+const JWKS = createRemoteJWKSet(
+  new URL(`${process.env.CLIENT_URL}/api/auth/jwks`),
+);
 
 const verifyToken = async (req, res, next) => {
   const authHeader = req?.headers.authorization;
@@ -50,11 +52,46 @@ async function run() {
     const destinationCollection = db.collection("destinations");
     const bookingCollection = db.collection("bookings");
 
-    app.get("/featured", async (req, res) => {
-      const result = await destinationCollection.find().limit(4).toArray()
-      res.json(result)
-    })
+    const db = client.db("ideaengine");
+    const ideaCollection = db.collection("ideas");
+    const commentCollection = db.collection("comments");
 
+    // 1. GET /ideas -> Fetch entire platform validation repository
+    app.get("/ideas", async (req, res) => {
+      try {
+        const result = await ideaCollection.find().toArray();
+        res.json(result);
+      } catch (err) {
+        res.status(500).json({ error: "Failed to fetch concept indexes." });
+      }
+    });
+
+    // 2. GET /ideas/featured -> Retrieve the top 4 highlighted validation targets for feed display
+    app.get("/ideas/featured", async (req, res) => {
+      try {
+        const result = await ideaCollection.find().limit(4).toArray();
+        res.json(result);
+      } catch (err) {
+        res
+          .status(500)
+          .json({ error: "Failed to pull featured dataset listings." });
+      }
+    });
+
+    app.get("/featured", async (req, res) => {
+      const result = await destinationCollection.find().limit(4).toArray();
+      res.json(result);
+    });
+
+    // 2. GET /ideas -> Fetch entire platform validation repository
+    app.get("/ideas", async (req, res) => {
+      try {
+        const result = await ideaCollection.find().toArray();
+        res.json(result);
+      } catch (err) {
+        res.status(500).json({ error: "Failed to fetch concept indexes." });
+      }
+    });
     app.get("/destination", async (req, res) => {
       const result = await destinationCollection.find().toArray();
       res.json(result);
