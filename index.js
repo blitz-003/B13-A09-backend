@@ -37,9 +37,16 @@ const verifyToken = async (req, res, next) => {
 
   try {
     const { payload } = await jwtVerify(token, JWKS);
-    console.log(payload);
+
+    req.user = {
+      id: payload.sub || payload.id,
+      email: payload.email,
+    };
+
+    console.log("Authenticated User ID:", req.user.id);
     next();
   } catch (error) {
+    console.error("Token verification failed:", error);
     return res.status(403).json({ message: "Forbidden" });
   }
 };
@@ -114,6 +121,14 @@ async function run() {
           solution,
         } = req.body;
 
+        // 1. Double check that the middleware caught the user ID successfully
+        const userId = req.user?.id;
+        if (!userId) {
+          return res.status(401).json({
+            error: "Unauthorized: Missing user identification context.",
+          });
+        }
+
         // Field level validation verification
         if (
           !title ||
@@ -128,7 +143,7 @@ async function run() {
             .json({ error: "Missing required core identity elements." });
         }
 
-        // Build standard record document schema payload mapping
+        // 2. Build document and map 'creatorId' directly from the token data
         const newIdea = {
           title,
           category,
@@ -137,6 +152,7 @@ async function run() {
           estimatedBudget: estimatedBudget || "N/A",
           problem,
           solution,
+          creatorId: userId, // <-- INJECTING USER ID FROM JWT HERE
           votes: 0,
           createdAt: new Date().toISOString(),
         };
@@ -154,6 +170,139 @@ async function run() {
         res
           .status(500)
           .json({ error: "Failed to allocate and add new product concept." });
+      }
+    });
+
+    //my ideas route
+    app.get("/my-ideas", verifyToken, async (req, res) => {
+      try {
+        // 1. Extract the unique userId from the decoded JWT payload
+        const userId = req.user?.id; // Or req.user?.sub, depending on how your JWT is structured
+
+        console.log(userId);
+        console.log("inside my ideas");
+        if (!userId) {
+          return res
+            .status(401)
+            .json({ error: "Invalid identity credentials." });
+        }
+
+        // 2. Query entries matching the specific logged-in author's ID
+        const result = await ideaCollection
+          .find({ creatorId: userId }) // Swapped from authorEmail to authorId
+          .toArray();
+
+        res.json(result);
+      } catch (err) {
+        res
+          .status(500)
+          .json({ error: "Failed to fetch user specific collections." });
+      }
+    });
+
+    // Update full system configuration parameters for a specific idea
+    app.put("/ideas/:id", verifyToken, async (req, res) => {
+      try {
+        const { id } = req.params;
+        const userId = req.user?.id; // Secured user ID parsed from JWT middleware
+
+        const {
+          title,
+          category,
+          shortDescription,
+          targetAudience,
+          estimatedBudget,
+          problem,
+          solution,
+        } = req.body;
+
+        if (!userId) {
+          return res
+            .status(401)
+            .json({ error: "Unauthorized access context." });
+        }
+
+        // 1. Target target document via explicit ObjectId tracking criteria
+        const query = { _id: new ObjectId(id) };
+        const existingIdea = await ideaCollection.findOne(query);
+
+        if (!existingIdea) {
+          return res.status(404).json({ error: "Concept entry not found." });
+        }
+
+        // 2. SECURITY CHECK: Verify that the requesting user is the original creator
+        if (existingIdea.creatorId !== userId) {
+          return res.status(403).json({
+            error: "Forbidden: You do not own this concept framework.",
+          });
+        }
+
+        // 3. Build the clean structural updating matrix package
+        const updatedDocument = {
+          $set: {
+            title: title || existingIdea.title,
+            category: category || existingIdea.category,
+            shortDescription: shortDescription || existingIdea.shortDescription,
+            targetAudience: targetAudience || existingIdea.targetAudience,
+            estimatedBudget: estimatedBudget || "N/A",
+            problem: problem || existingIdea.problem,
+            solution: solution || existingIdea.solution,
+            updatedAt: new Date().toISOString(),
+          },
+        };
+
+        const result = await ideaCollection.updateOne(query, updatedDocument);
+
+        res.json({
+          success: true,
+          message: "Concept metadata parameters updated successfully.",
+        });
+      } catch (err) {
+        console.error("Database processing pipeline exception:", err);
+        res
+          .status(500)
+          .json({ error: "Failed to compile database update array." });
+      }
+    });
+
+    // 3. UNINDEX / REMOVE PERMANENTLY FROM REGISTRY
+    app.delete("/ideas/:id", verifyToken, async (req, res) => {
+      try {
+        const { id } = req.params;
+        const userId = req.user?.id; // Grab the verified user's ID from the JWT payload
+
+        if (!userId) {
+          return res
+            .status(401)
+            .json({ error: "Unauthorized access context." });
+        }
+
+        // FIX: Make the query look for BOTH the document ID AND the matching creatorId
+        const query = {
+          _id: new ObjectId(id),
+          creatorId: userId,
+        };
+
+        const result = await ideaCollection.deleteOne(query);
+
+        // If result.deletedCount is 0, it means either the idea doesn't exist,
+        // OR it exists but the creatorId doesn't match the person logged in.
+        if (result.deletedCount === 0) {
+          return res.status(404).json({
+            error:
+              "Target entry not found or you are not authorized to delete it.",
+          });
+        }
+
+        res.json({
+          success: true,
+          message: "Idea permanently unindexed from core registry.",
+        });
+      } catch (err) {
+        console.error("Delete route failure:", err);
+        res.status(500).json({
+          error: "Server structural compilation failure on delete sequence.",
+        });
       }
     });
 
