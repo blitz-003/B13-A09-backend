@@ -556,6 +556,13 @@ app.get("/", (req, res) => {
   res.send("Server is running fine!");
 });
 
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+// Dynamic conditional wrapper for server execution
+if (process.env.NODE_ENV !== "production") {
+  const PORT = process.env.PORT || 5000;
+  app.listen(PORT, () => {
+    console.log(`Server executing locally on port ${PORT}`);
+  });
+}
+
+// CRUCIAL: Export the app module for Vercel's serverless engine to intercept
+module.exports = app;
