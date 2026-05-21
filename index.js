@@ -58,6 +58,8 @@ async function run() {
     const db = client.db("ideaengine");
     const ideaCollection = db.collection("ideas");
     const commentCollection = db.collection("comments");
+    const destinationCollection = db.collection("destinations");
+    const bookingCollection = db.collection("bookings");
 
     // Fetch entire platform's idea
     app.get("/ideas", async (req, res) => {
@@ -119,9 +121,9 @@ async function run() {
           estimatedBudget,
           problem,
           solution,
+          image, // <-- Extracted optional image asset URL string
         } = req.body;
 
-        // 1. Double check that the middleware caught the user ID successfully
         const userId = req.user?.id;
         if (!userId) {
           return res.status(401).json({
@@ -129,7 +131,6 @@ async function run() {
           });
         }
 
-        // Field level validation verification
         if (
           !title ||
           !category ||
@@ -143,7 +144,7 @@ async function run() {
             .json({ error: "Missing required core identity elements." });
         }
 
-        // 2. Build document and map 'creatorId' directly from the token data
+        // Build mapped object—all properties related to voting have been dropped cleanly
         const newIdea = {
           title,
           category,
@@ -152,14 +153,14 @@ async function run() {
           estimatedBudget: estimatedBudget || "N/A",
           problem,
           solution,
-          creatorId: userId, // <-- INJECTING USER ID FROM JWT HERE
-          votes: 0,
+          image: image || "", // <-- Appended image tracking field
+          creatorId: userId,
+          comments: [],
           createdAt: new Date().toISOString(),
         };
 
         const result = await ideaCollection.insertOne(newIdea);
 
-        // Return explicit status update blocks back to user
         res.status(201).json({
           success: true,
           message: "Concept successfully indexed.",
@@ -173,11 +174,10 @@ async function run() {
       }
     });
 
-    //my ideas route
+    // my ideas route
     app.get("/my-ideas", verifyToken, async (req, res) => {
       try {
-        // 1. Extract the unique userId from the decoded JWT payload
-        const userId = req.user?.id; // Or req.user?.sub, depending on how your JWT is structured
+        const userId = req.user?.id;
 
         console.log(userId);
         console.log("inside my ideas");
@@ -187,9 +187,8 @@ async function run() {
             .json({ error: "Invalid identity credentials." });
         }
 
-        // 2. Query entries matching the specific logged-in author's ID
         const result = await ideaCollection
-          .find({ creatorId: userId }) // Swapped from authorEmail to authorId
+          .find({ creatorId: userId })
           .toArray();
 
         res.json(result);
@@ -204,7 +203,7 @@ async function run() {
     app.put("/ideas/:id", verifyToken, async (req, res) => {
       try {
         const { id } = req.params;
-        const userId = req.user?.id; // Secured user ID parsed from JWT middleware
+        const userId = req.user?.id;
 
         const {
           title,
@@ -222,7 +221,6 @@ async function run() {
             .json({ error: "Unauthorized access context." });
         }
 
-        // 1. Target target document via explicit ObjectId tracking criteria
         const query = { _id: new ObjectId(id) };
         const existingIdea = await ideaCollection.findOne(query);
 
@@ -230,14 +228,12 @@ async function run() {
           return res.status(404).json({ error: "Concept entry not found." });
         }
 
-        // 2. SECURITY CHECK: Verify that the requesting user is the original creator
         if (existingIdea.creatorId !== userId) {
           return res.status(403).json({
             error: "Forbidden: You do not own this concept framework.",
           });
         }
 
-        // 3. Build the clean structural updating matrix package
         const updatedDocument = {
           $set: {
             title: title || existingIdea.title,
@@ -265,11 +261,11 @@ async function run() {
       }
     });
 
-    // 3. UNINDEX / REMOVE PERMANENTLY FROM REGISTRY
+    // UNINDEX / REMOVE PERMANENTLY FROM REGISTRY
     app.delete("/ideas/:id", verifyToken, async (req, res) => {
       try {
         const { id } = req.params;
-        const userId = req.user?.id; // Grab the verified user's ID from the JWT payload
+        const userId = req.user?.id;
 
         if (!userId) {
           return res
@@ -277,7 +273,6 @@ async function run() {
             .json({ error: "Unauthorized access context." });
         }
 
-        // FIX: Make the query look for BOTH the document ID AND the matching creatorId
         const query = {
           _id: new ObjectId(id),
           creatorId: userId,
@@ -285,8 +280,6 @@ async function run() {
 
         const result = await ideaCollection.deleteOne(query);
 
-        // If result.deletedCount is 0, it means either the idea doesn't exist,
-        // OR it exists but the creatorId doesn't match the person logged in.
         if (result.deletedCount === 0) {
           return res.status(404).json({
             error:
@@ -322,7 +315,7 @@ async function run() {
         const commentId = `c-${Date.now()}`;
         const freshComment = {
           id: commentId,
-          ideaId: id, // Track which idea this comment belongs to
+          ideaId: id,
           userId,
           userName: userName || "Anonymous",
           text: text.trim(),
@@ -332,7 +325,6 @@ async function run() {
             .substring(0, 16),
         };
 
-        // Operation A: Push to the idea's embedded display array
         const ideaResult = await ideaCollection.updateOne(
           { _id: new ObjectId(id) },
           { $push: { comments: freshComment } },
@@ -344,9 +336,8 @@ async function run() {
             .json({ error: "Target idea framework entry not found." });
         }
 
-        // Operation B: Insert into dedicated comments collection for interactions lookup
         await db.collection("comments").insertOne({
-          _id: commentId, // Keep IDs matching for clean cross-referencing
+          _id: commentId,
           ideaId: id,
           userId,
           userName: freshComment.userName,
@@ -372,13 +363,11 @@ async function run() {
           const { id, commentId } = req.params;
           const userId = req.user?.id;
 
-          // Operation A: Pull from embedded display array
           const ideaResult = await ideaCollection.updateOne(
             { _id: new ObjectId(id) },
             { $pull: { comments: { id: commentId, userId: userId } } },
           );
 
-          // Operation B: Delete from dedicated interactions collection
           const commentResult = await db.collection("comments").deleteOne({
             _id: commentId,
             userId: userId,
@@ -416,11 +405,10 @@ async function run() {
             .json({ error: "Unauthorized access context." });
         }
 
-        // Instantly finds all comments written by this user across all ideas
         const userComments = await db
           .collection("comments")
           .find({ userId: userId })
-          .sort({ timestamp: -1 }) // Newest interactions first
+          .sort({ timestamp: -1 })
           .toArray();
 
         res.json(userComments);
@@ -447,7 +435,6 @@ async function run() {
               .json({ error: "Comment text cannot be blank." });
           }
 
-          // Update the specific matched array element if the author matches the token user
           const result = await ideaCollection.updateOne(
             {
               _id: new ObjectId(id),
@@ -473,81 +460,11 @@ async function run() {
       },
     );
 
-    app.get("/destination", async (req, res) => {
-      const result = await destinationCollection.find().toArray();
-      res.json(result);
-    });
-
-    app.post("/destination", async (req, res) => {
-      const destinationData = req.body;
-      console.log(destinationData);
-      const result = await destinationCollection.insertOne(destinationData);
-
-      res.json(result);
-    });
-
-    app.get("/destination/:id", verifyToken, async (req, res) => {
-      const { id } = req.params;
-
-      const result = await destinationCollection.findOne({
-        _id: new ObjectId(id),
-      });
-
-      res.json(result);
-    });
-
-    app.patch("/destination/:id", async (req, res) => {
-      const { id } = req.params;
-      const updatedData = req.body;
-      console.log(updatedData);
-
-      const result = await destinationCollection.updateOne(
-        { _id: new ObjectId(id) },
-        { $set: updatedData },
-      );
-
-      res.json(result);
-    });
-
-    app.delete("/destination/:id", async (req, res) => {
-      const { id } = req.params;
-      const result = await destinationCollection.deleteOne({
-        _id: new ObjectId(id),
-      });
-      res.json(result);
-    });
-
-    app.get("/booking/:userId", async (req, res) => {
-      const { userId } = req.params;
-
-      const result = await bookingCollection.find({ userId: userId }).toArray();
-
-      res.json(result);
-    });
-
-    app.post("/booking", verifyToken, async (req, res) => {
-      const bookingData = req.body;
-      const result = await bookingCollection.insertOne(bookingData);
-
-      res.json(result);
-    });
-
-    app.delete("/booking/:bookingId", verifyToken, async (req, res) => {
-      const { bookingId } = req.params;
-      const result = await bookingCollection.deleteOne({
-        _id: new ObjectId(bookingId),
-      });
-
-      res.json(result);
-    });
-
-    // await client.db("admin").command({ ping: 1 });
     console.log(
       "Pinged your deployment. You successfully connected to MongoDB!",
     );
   } finally {
-    // Ensures that the client will close when you finish/error
-    // await client.close();
+    // Persistent client loop handlers
   }
 }
 run().catch(console.dir);
@@ -556,7 +473,6 @@ app.get("/", (req, res) => {
   res.send("Server is running fine!");
 });
 
-// Dynamic conditional wrapper for server execution
 if (process.env.NODE_ENV !== "production") {
   const PORT = process.env.PORT || 5000;
   app.listen(PORT, () => {
@@ -564,5 +480,4 @@ if (process.env.NODE_ENV !== "production") {
   });
 }
 
-// CRUCIAL: Export the app module for Vercel's serverless engine to intercept
 module.exports = app;
