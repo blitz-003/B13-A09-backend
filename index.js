@@ -62,10 +62,10 @@ async function run() {
       }
     });
 
-    // Retrieve the top 4 highlighted validation targets for feed display
+    // Retrieve the top 6 highlighted validation targets for feed display
     app.get("/ideas/featured", async (req, res) => {
       try {
-        const result = await ideaCollection.find().limit(4).toArray();
+        const result = await ideaCollection.find().limit(6).toArray();
         res.json(result);
       } catch (err) {
         res
@@ -90,13 +90,70 @@ async function run() {
     });
 
     // Get details for a single idea entry
-    app.get("/ideas/:id", async (req, res) => {
+    app.get("/ideas/:id", verifyToken, async (req, res) => {
       try {
         const { id } = req.params;
         const result = await ideaCollection.findOne({ _id: new ObjectId(id) });
+        console.log("server side idea details");
         res.json(result);
       } catch (err) {
         res.status(500).json({ error: "Failed to fetch idea details." });
+      }
+    });
+
+    // Add a new idea securely to the database collection
+    app.post("/add-idea", verifyToken, async (req, res) => {
+      try {
+        const {
+          title,
+          category,
+          shortDescription,
+          targetAudience,
+          estimatedBudget,
+          problem,
+          solution,
+        } = req.body;
+
+        // Field level validation verification
+        if (
+          !title ||
+          !category ||
+          !shortDescription ||
+          !targetAudience ||
+          !problem ||
+          !solution
+        ) {
+          return res
+            .status(400)
+            .json({ error: "Missing required core identity elements." });
+        }
+
+        // Build standard record document schema payload mapping
+        const newIdea = {
+          title,
+          category,
+          shortDescription,
+          targetAudience,
+          estimatedBudget: estimatedBudget || "N/A",
+          problem,
+          solution,
+          votes: 0,
+          createdAt: new Date().toISOString(),
+        };
+
+        const result = await ideaCollection.insertOne(newIdea);
+
+        // Return explicit status update blocks back to user
+        res.status(201).json({
+          success: true,
+          message: "Concept successfully indexed.",
+          insertedId: result.insertedId,
+        });
+      } catch (err) {
+        console.error("Database Injection Error:", err);
+        res
+          .status(500)
+          .json({ error: "Failed to allocate and add new product concept." });
       }
     });
 
