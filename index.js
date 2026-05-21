@@ -1,9 +1,9 @@
 const express = require("express");
-const dontenv = require("dotenv");
+const dotenv = require("dotenv");
 const cors = require("cors");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const { createRemoteJWKSet, jwtVerify } = require("jose-cjs");
-dontenv.config();
+dotenv.config();
 
 const uri = process.env.MONGODB_URI;
 
@@ -46,7 +46,7 @@ const verifyToken = async (req, res, next) => {
 
 async function run() {
   try {
-    // await client.connect();
+    await client.connect();
 
     const db = client.db("ideaengine");
     const ideaCollection = db.collection("ideas");
@@ -168,7 +168,7 @@ async function run() {
       res.json(result);
     });
 
-    // await client.db("admin").command({ ping: 1 });
+    await client.db("admin").command({ ping: 1 });
     console.log(
       "Pinged your deployment. You successfully connected to MongoDB!",
     );
