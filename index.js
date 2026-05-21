@@ -306,6 +306,173 @@ async function run() {
       }
     });
 
+    // Post a comment and index it under user interactions
+    app.post("/ideas/:id/comments", verifyToken, async (req, res) => {
+      try {
+        const { id } = req.params;
+        const { text, userName } = req.body;
+        const userId = req.user?.id;
+
+        if (!text?.trim()) {
+          return res
+            .status(400)
+            .json({ error: "Comment text cannot be empty." });
+        }
+
+        const commentId = `c-${Date.now()}`;
+        const freshComment = {
+          id: commentId,
+          ideaId: id, // Track which idea this comment belongs to
+          userId,
+          userName: userName || "Anonymous",
+          text: text.trim(),
+          timestamp: new Date()
+            .toISOString()
+            .replace("T", " ")
+            .substring(0, 16),
+        };
+
+        // Operation A: Push to the idea's embedded display array
+        const ideaResult = await ideaCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $push: { comments: freshComment } },
+        );
+
+        if (ideaResult.matchedCount === 0) {
+          return res
+            .status(404)
+            .json({ error: "Target idea framework entry not found." });
+        }
+
+        // Operation B: Insert into dedicated comments collection for interactions lookup
+        await db.collection("comments").insertOne({
+          _id: commentId, // Keep IDs matching for clean cross-referencing
+          ideaId: id,
+          userId,
+          userName: freshComment.userName,
+          text: freshComment.text,
+          timestamp: freshComment.timestamp,
+        });
+
+        res.status(201).json({ success: true, comment: freshComment });
+      } catch (err) {
+        console.error(err);
+        res
+          .status(500)
+          .json({ error: "Failed to persist comment token record." });
+      }
+    });
+
+    // Remove comment from both structural destinations
+    app.delete(
+      "/ideas/:id/comments/:commentId",
+      verifyToken,
+      async (req, res) => {
+        try {
+          const { id, commentId } = req.params;
+          const userId = req.user?.id;
+
+          // Operation A: Pull from embedded display array
+          const ideaResult = await ideaCollection.updateOne(
+            { _id: new ObjectId(id) },
+            { $pull: { comments: { id: commentId, userId: userId } } },
+          );
+
+          // Operation B: Delete from dedicated interactions collection
+          const commentResult = await db.collection("comments").deleteOne({
+            _id: commentId,
+            userId: userId,
+          });
+
+          if (
+            ideaResult.modifiedCount === 0 &&
+            commentResult.deletedCount === 0
+          ) {
+            return res.status(404).json({
+              error: "Comment not found or unauthorized action context.",
+            });
+          }
+
+          res.json({
+            success: true,
+            message: "Comment successfully discarded.",
+          });
+        } catch (err) {
+          res
+            .status(500)
+            .json({ error: "Database exception handling comment removal." });
+        }
+      },
+    );
+
+    // Get all comment interactions for the logged-in user
+    app.get("/my-interactions/comments", verifyToken, async (req, res) => {
+      try {
+        const userId = req.user?.id;
+
+        if (!userId) {
+          return res
+            .status(401)
+            .json({ error: "Unauthorized access context." });
+        }
+
+        // Instantly finds all comments written by this user across all ideas
+        const userComments = await db
+          .collection("comments")
+          .find({ userId: userId })
+          .sort({ timestamp: -1 }) // Newest interactions first
+          .toArray();
+
+        res.json(userComments);
+      } catch (err) {
+        res.status(500).json({
+          error: "Failed to fetch user interactions history pipeline.",
+        });
+      }
+    });
+
+    // PATCH: Modify an existing embedded comment document's text string
+    app.patch(
+      "/ideas/:id/comments/:commentId",
+      verifyToken,
+      async (req, res) => {
+        try {
+          const { id, commentId } = req.params;
+          const { text } = req.body;
+          const userId = req.user?.id;
+
+          if (!text?.trim()) {
+            return res
+              .status(400)
+              .json({ error: "Comment text cannot be blank." });
+          }
+
+          // Update the specific matched array element if the author matches the token user
+          const result = await ideaCollection.updateOne(
+            {
+              _id: new ObjectId(id),
+              "comments.id": commentId,
+              "comments.userId": userId,
+            },
+            { $set: { "comments.$.text": text.trim() } },
+          );
+
+          if (result.modifiedCount === 0) {
+            return res.status(404).json({
+              error: "Comment not found or unauthorized modification access.",
+            });
+          }
+
+          res.json({ success: true, text: text.trim() });
+        } catch (err) {
+          console.error("Edit comment error:", err);
+          res
+            .status(500)
+            .json({ error: "Server error updating comment text index." });
+        }
+      },
+    );
+
     app.get("/destination", async (req, res) => {
       const result = await destinationCollection.find().toArray();
       res.json(result);
