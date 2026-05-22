@@ -115,13 +115,15 @@ async function run() {
       try {
         const {
           title,
-          category,
           shortDescription,
+          detailedDescription,
+          category,
+          tags, // <-- Optional
+          image, // <-- Now Compulsory!
+          estimatedBudget, // <-- Optional
           targetAudience,
-          estimatedBudget,
           problem,
           solution,
-          image, // <-- Extracted optional image asset URL string
         } = req.body;
 
         const userId = req.user?.id;
@@ -131,29 +133,36 @@ async function run() {
           });
         }
 
+        // Comprehensive validation including 'image' as a mandatory field
         if (
-          !title ||
-          !category ||
-          !shortDescription ||
-          !targetAudience ||
-          !problem ||
-          !solution
+          !title?.trim() ||
+          !shortDescription?.trim() ||
+          !detailedDescription?.trim() ||
+          !category?.trim() ||
+          !image?.trim() || // <-- Added to required validation block
+          !targetAudience?.trim() ||
+          !problem?.trim() ||
+          !solution?.trim()
         ) {
           return res
             .status(400)
-            .json({ error: "Missing required core identity elements." });
+            .json({
+              error: "Missing required core identity elements or data modules.",
+            });
         }
 
-        // Build mapped object—all properties related to voting have been dropped cleanly
+        // Build fully mapped data schema block to inject into MongoDB
         const newIdea = {
-          title,
-          category,
-          shortDescription,
-          targetAudience,
-          estimatedBudget: estimatedBudget || "N/A",
-          problem,
-          solution,
-          image: image || "", // <-- Appended image tracking field
+          title: title.trim(),
+          shortDescription: shortDescription.trim(),
+          detailedDescription: detailedDescription.trim(),
+          category: category.trim(),
+          tags: Array.isArray(tags) ? tags : tags ? [tags] : [], // Normalized array tracking
+          image: image.trim(), // Stored safely as guaranteed string
+          estimatedBudget: estimatedBudget?.trim() || "N/A", // Defaults to N/A if omitted
+          targetAudience: targetAudience.trim(),
+          problem: problem.trim(),
+          solution: solution.trim(),
           creatorId: userId,
           comments: [],
           createdAt: new Date().toISOString(),
