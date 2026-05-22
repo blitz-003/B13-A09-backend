@@ -118,9 +118,9 @@ async function run() {
           shortDescription,
           detailedDescription,
           category,
-          tags, // <-- Optional
-          image, // <-- Now Compulsory!
-          estimatedBudget, // <-- Optional
+          tags,
+          image,
+          estimatedBudget,
           targetAudience,
           problem,
           solution,
@@ -144,11 +144,9 @@ async function run() {
           !problem?.trim() ||
           !solution?.trim()
         ) {
-          return res
-            .status(400)
-            .json({
-              error: "Missing required core identity elements or data modules.",
-            });
+          return res.status(400).json({
+            error: "Missing required core identity elements or data modules.",
+          });
         }
 
         // Build fully mapped data schema block to inject into MongoDB
@@ -157,9 +155,9 @@ async function run() {
           shortDescription: shortDescription.trim(),
           detailedDescription: detailedDescription.trim(),
           category: category.trim(),
-          tags: Array.isArray(tags) ? tags : tags ? [tags] : [], // Normalized array tracking
+          tags: Array.isArray(tags) ? tags : tags ? [tags] : [],
           image: image.trim(), // Stored safely as guaranteed string
-          estimatedBudget: estimatedBudget?.trim() || "N/A", // Defaults to N/A if omitted
+          estimatedBudget: estimatedBudget?.trim() || "N/A",
           targetAudience: targetAudience.trim(),
           problem: problem.trim(),
           solution: solution.trim(),
@@ -403,24 +401,44 @@ async function run() {
       },
     );
 
-    // Get all comment interactions for the logged-in user
     app.get("/my-interactions/comments", verifyToken, async (req, res) => {
       try {
         const userId = req.user?.id;
-
-        if (!userId) {
+        if (!userId)
           return res
             .status(401)
             .json({ error: "Unauthorized access context." });
-        }
 
+        // 1. Get the user's comments
         const userComments = await db
           .collection("comments")
-          .find({ userId: userId })
+          .find({ userId })
           .sort({ timestamp: -1 })
           .toArray();
 
-        res.json(userComments);
+        // 2. Map through and attach the idea title directly
+        const formattedInteractions = await Promise.all(
+          userComments.map(async (comment) => {
+            // Query handling both ObjectId conversions and raw String lookups at the same time
+            const parentIdea = await db.collection("ideas").findOne({
+              $or: [
+                { _id: comment.ideaId },
+                {
+                  _id: ObjectId.isValid(comment.ideaId)
+                    ? new ObjectId(comment.ideaId)
+                    : null,
+                },
+              ],
+            });
+
+            return {
+              ...comment,
+              parentIdeaTitle: parentIdea?.title || "Untitled Concept Document",
+            };
+          }),
+        );
+
+        res.json(formattedInteractions);
       } catch (err) {
         res.status(500).json({
           error: "Failed to fetch user interactions history pipeline.",
